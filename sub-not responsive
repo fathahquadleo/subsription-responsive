@@ -1,0 +1,744 @@
+import React, { Fragment, useState, useEffect } from "react";
+import { Col, Card, CardHeader, CardBody, Form, FormGroup, Label, Row, Nav, NavItem, NavLink, TabContent, TabPane, Button, Table } from 'reactstrap';
+import { Btn, H3, Breadcrumbs } from "../../../AbstractElements";
+import { useForm, Controller } from 'react-hook-form';
+import { useNavigate } from 'react-router-dom';
+import { AddSub, Category, InvoiceDate, StbModem, Customer, ChooseSub, Recurring, PlanDate, Subscription, Save, Package, Addon, Notes, RenewSubscription } from "../../../Constant";
+import { getCustomers, getPackage, getAddon, addCustomerSubscription, getStb, getStbRole, getCategoryRole, getCustomersRole, addCustomerSubscriptionRole, selectCustStb, getcategoryincome, selectCustStbRole, getPackageRole, getAddonRole } from "../../../CommenUrl";
+import { useSelector } from "react-redux";
+import { getClientUrlDataToken, postClientUrlWithToken } from "../../../Utils/restUtils";
+import { toast } from 'react-toastify';
+import Typeahead from "../../../CommonElements/TypeAhead";
+import { yupResolver } from "@hookform/resolvers/yup";
+import * as yup from "yup";
+import DatePicker from 'react-datepicker';
+import moment from "moment";
+import Transparentspinner from "../../Common/Loader/Transparentspinner";
+import SubscribedTable from "./SubscribedTable";
+
+
+
+const schema = yup.object().shape({
+    stb: yup.mixed().required().label('STB/Modem'),
+    customer: yup.mixed().required().label('Customer'),
+    category: yup.mixed().required().label('Category'),
+    recurring: yup.mixed().required().label('Recurring'),
+})
+
+const SubscriptionForm = () => {
+    const [spinnerTrans, setspinnerTrans] = useState(false)
+
+    const { register, handleSubmit, control, setValue, formState: { errors } } = useForm({
+        resolver: yupResolver(schema),
+    });
+    const authState = useSelector((state) => state.auth);
+    const currency = authState.currency;
+
+    // const [loading, setLoading] = useState(false);
+    const [customer, setCustomer] = useState([]);
+    const [customerOption, setCustomerOption] = useState([]);
+    const [category, setCategory] = useState([])
+    const [categoryOption, setCategoryOption] = useState([]);
+    const [stb, setStb] = useState([])
+    const [stbOption, setStbOption] = useState([]);
+    const [packages, setPackage] = useState([]);
+    const [packageOption, setPackageOption] = useState([]);
+    const [selectedCust, setselectedCust] = useState({})
+    // const [addoncon, setaddoncon] = useState('')
+    const [IconWithTab, setIconWithTab] = useState('1');
+    // const [selectpackage, setselectpackage] = useState(null)
+    const [form, setForm] = useState([]);
+    const [addons, setAddons] = useState([]);
+    const [addonsOptions, setaddonsOptions] = useState([]);
+    // const [addonconState, setAddonconState] = useState(addoncon);
+    const [totalunitcost, settotalunitcost] = useState(0)
+    const [totalDiscount, settotalDiscount] = useState(0)
+    const [totalTaxamount, settotalTaxamount] = useState(0);
+    const [grandTotl, setgrandTotl] = useState(0)
+    const [disableOptions, setdisableOptions] = useState([])
+    const [disableRecurring, setdisableRecurring] = useState(null)
+    const [selectedstbId, setselectedstbId] = useState(null);
+    const navigate = useNavigate();
+
+    const [startDate, setstartDate] = useState(new Date());
+    const [planStart, setplanStart] = useState(new Date());
+
+    const recurringOptions = [
+        { value: 'yes', label: 'Yes' },
+        { value: 'no', label: 'No' },
+    ];
+    const recurringOptionssecound = [
+        { value: 'no', label: 'No' },
+    ];
+
+    const handleChangeInvoicedate = date => {
+        setstartDate(date);
+        setplanStart(date);
+    };
+    const handleChangePlanedate = date => {
+        const prevMontdate = moment().subtract(1, 'month').date('DD');
+        const selectPastmonth = moment(date).isBefore(prevMontdate);
+
+
+        setplanStart(date);
+        if (selectPastmonth) {
+            setValue("recurring", recurringOptions[1]);
+            setdisableRecurring(1)
+        } else {
+            setValue("recurring", "");
+            setdisableRecurring(0)
+
+        }
+    };
+
+
+    useEffect(() => {
+        const newGrandTotal = form.reduce((acc, curr) => acc + curr.total, 0);
+        const newUnitCost = form.reduce((acc, curr) => acc + curr.unitcost, 0);
+        const newDiscount = form.reduce((acc, curr) => acc + curr.discount, 0);
+        const newtaxAmount = form.reduce((acc, curr) => acc + curr.tax_amount, 0);
+        settotalunitcost(parseFloat(newUnitCost).toFixed(authState.decimal));
+        settotalDiscount(isNaN(newDiscount) ? 0 : parseFloat(newDiscount).toFixed(authState.decimal));
+        settotalTaxamount(isNaN(newtaxAmount) ? 0 : parseFloat(newtaxAmount).toFixed(authState.decimal));
+
+        setgrandTotl(isNaN(newGrandTotal) ? 0 : parseFloat(newGrandTotal).toFixed(authState.decimal));
+    }, [form]);
+
+    useEffect(() => {
+        categoryData();
+        stbData();
+        customerData();
+        packageData();
+    }, [selectedCust]);
+
+
+    useEffect(() => {
+        setCustomerOption(
+            customer.map((item) => ({
+                value: item.id,
+                label: item.name,
+            }))
+        );
+
+        setPackageOption(
+            packages.map((data) => ({
+                value: data.id,
+                label: <div className="d-flex justify-content-between"><div>{data.name}</div> <div>{currency} {data.price}</div></div>,
+                price: data.price,
+                name: data.name,
+                tax: data.tax_rates.map((t) => (t.name + '-' + t.tax_percentage + '%')),
+                type: 'master',
+                percentage: data.tax_rates.map((items) => items.tax_percentage),
+
+            }))
+        );
+        setCategoryOption(
+            category.map((data) => ({
+                value: data.id,
+                label: data.name,
+            }))
+        );
+    }, [customer, stb, packages, category]);
+
+    useEffect(() => {
+        setaddonsOptions(
+            addons.map((data) => ({
+                value: data.id,
+                label: <div className="d-flex justify-content-between"><div>{data.title}</div> <div>{currency} {data.price}</div></div>,
+                price: data.price,
+                tax: data.tax_rates.map((tax) => (tax.name + '-' + tax.tax_percentage + '%')),
+                name: data.title,
+                type: 'addon',
+                percentage: data.tax_rates.map((items) => items.tax_percentage),
+
+
+            }))
+        )
+    }, [addons])
+
+    const selectCustomerStb = async (e) => {
+        setspinnerTrans(true)
+
+        const selectedStbcust = e.value;
+        let stb_api = await getClientUrlDataToken(authState.apiUrl, authState.userRole === 1 ? selectCustStb + `?customer_id=${selectedStbcust}` : selectCustStbRole + `?customer_id=${selectedStbcust}`);
+        if (stb_api.status === true) {
+            const single_stb = stb_api.data.stb;
+            setStbOption(
+                single_stb.map((item) => ({
+                    value: item.stb_no,
+                    label: item.stb_no + '(' + item.connection_type + ')',
+                    id: item.id,
+                    connection: item.connection_type,
+                }))
+            );
+            setspinnerTrans(false)
+
+        }
+        else if (stb_api.status >= 400 && stb_api.status <= 405) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page1`);
+        } else if (stb_api.status >= 500 && data.status <= 505) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page4`);
+        }
+        else {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page3`);
+        }
+    }
+
+    const stbData = async () => {
+        setspinnerTrans(true)
+        let data = await getClientUrlDataToken(authState.apiUrl, authState.userRole === 1 ? getStb : getStbRole);
+        if (data.status === true) {
+            setStb(data.data);
+        }
+        else if (data.status >= 400 && data.status <= 405) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page1`);
+        } else if (data.status >= 500 && data.status <= 505) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page4`);
+        }
+        else {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page3`);
+        }
+        setspinnerTrans(false)
+    };
+
+    const categoryData = async () => {
+        setspinnerTrans(true)
+        let data = await getClientUrlDataToken(authState.apiUrl, authState.userRole === 1 ? getcategoryincome : getCategoryRole);
+        if (data.status === true) {
+            setCategory(data.data);
+        }
+        else if (data.status >= 400 && data.status <= 405) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page1`);
+        } else if (data.status >= 500 && data.status <= 505) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page4`);
+        }
+        else {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page3`);
+
+        }
+        setspinnerTrans(false)
+    };
+
+    const packageData = async (connectiontType) => {
+        if (connectiontType) {
+            setspinnerTrans(true)
+            let data = await getClientUrlDataToken(authState.apiUrl, authState.userRole === 1 ? getPackage + `?connection_type=${connectiontType}` : getPackageRole + `?connection_type=${connectiontType}`);
+            if (data.status === true) {
+                setPackage(data.data);
+            }
+            else if (data.status >= 400 && data.status <= 405) {
+                navigate(`${process.env.PUBLIC_URL}/pages/error/error-page1`);
+            } else if (data.status >= 500 && data.status <= 505) {
+                navigate(`${process.env.PUBLIC_URL}/pages/error/error-page4`);
+            }
+            else {
+                navigate(`${process.env.PUBLIC_URL}/pages/error/error-page3`);
+
+            }
+            setspinnerTrans(false)
+        }
+
+    };
+    const customerData = async () => {
+        setspinnerTrans(true)
+        let data = await getClientUrlDataToken(authState.apiUrl, authState.userRole === 1 ? getCustomers : getCustomersRole);
+        if (data.status === true) {
+            setCustomer(data.data);
+        }
+        else if (data.status >= 400 && data.status <= 405) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page1`);
+        } else if (data.status >= 500 && data.status <= 505) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page4`);
+        }
+        else {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page3`);
+        }
+        setspinnerTrans(false)
+    };
+    const addon = async (connection) => {
+        setspinnerTrans(true)
+        let data = await getClientUrlDataToken(authState.apiUrl, authState.userRole === 1 ? getAddon + `?connection_type=${connection}` : getAddonRole + `?connection_type=${connection}`);
+        if (data.status === true) {
+            setAddons(data.data);
+        }
+        else if (data.status >= 400 && data.status <= 405) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page1`);
+        } else if (data.status >= 500 && data.status <= 505) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page4`);
+        }
+        else {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page3`);
+        }
+        setspinnerTrans(false)
+
+    }
+
+
+    const resetCustomer = () => {
+        setValue("recurring", '')
+        setValue("stb", '')
+        setValue("package", '')
+        setValue("addon", '')
+        setForm([])
+    }
+    const resetStb = () => {
+        setValue("recurring", '')
+        setValue("package", '')
+        setValue("addon", '')
+        setForm([])
+    }
+
+
+    const resetPackage = () => {
+        setValue("addon", '')
+    }
+
+
+    const handleProductSelect = (product) => {
+        const existingIndex = form.findIndex(item => item.id === product.id);
+        const map_percent = product.percentage.reduce((acc, curr) => acc + curr, 0);
+        const discountamount = product.discount ?? 0;
+        const product_disc = product.price - discountamount;
+        const priceWithtax = (map_percent / 100) * product_disc;
+        const unitCost = parseFloat(product.price).toFixed(authState.decimal);
+
+        if (product.type === 'addon') {
+            setForm([...form, { ...product, type: product.type, discount_type: 'cash', package_id: product.value, unitcost: product.price, name: product.name, quantity: 1, price: unitCost, discount: 0, tax: product.tax, tax_amount: priceWithtax, total: product.price + priceWithtax }]);
+        } else if (existingIndex !== -1) {
+            setForm([{ ...product, type: product.type, package_id: product.value, unitcost: product.price, name: product.name, quantity: 1, price: unitCost, discount: 0, discount_type: 'cash', tax: product.tax, tax_amount: priceWithtax, total: product.price + priceWithtax }]);
+        } else {
+            setForm([...form, { ...product, type: product.type, package_id: product.value, unitcost: product.price, name: product.name, quantity: 1, price: unitCost, discount: 0, discount_type: 'cash', tax: product.tax, tax_amount: priceWithtax, total: product.price + priceWithtax }]);
+
+        }
+
+    };
+
+    const handleAddonOption = (value) => {
+        setdisableOptions([...disableOptions, value]);
+    }
+    const handletotalamount = (index, value) => {
+        const parsedValue = parseFloat(value) || 0;
+        setForm((prevForm) => {
+
+            const updatedform = [...prevForm];
+            const currentRow = { ...updatedform[index] };
+            const map_percent = currentRow.percentage.reduce((acc, curr) => acc + curr, 0);
+
+            currentRow.discount = isNaN(parsedValue) ? 0 : parsedValue;
+
+            const productprice = currentRow.price;
+            const productpricewithdiscount = productprice - currentRow.discount;
+            const priceWithtax = (map_percent / 100) * productpricewithdiscount;
+            currentRow.tax_amount = priceWithtax;
+
+
+            const setTotal = (productpricewithdiscount + priceWithtax)
+            currentRow.total = isNaN(setTotal) ? productpricewithdiscount : setTotal;
+            updatedform[index] = currentRow;
+            return updatedform;
+        })
+
+    };
+    const handleRemove = (index, value) => {
+        if (form[index].type === 'master') {
+            setValue("package", '');
+            setValue("addon", '');
+            setForm([]);
+            setdisableOptions([]);
+        } else {
+            const updatedForm = [...form];
+            const addonId = value.value;
+            updatedForm.splice(index, 1);
+            setForm(updatedForm);
+            const updateAddonoption = disableOptions.filter(num => num !== addonId);
+            setdisableOptions([...updateAddonoption, updateAddonoption]);
+        }
+    };
+
+    const onSubmit = async (data) => {
+        setspinnerTrans(true)
+
+        const invoice_Date = moment(startDate).format("DD-MM-YYYY");
+        const plane_Date = moment(planStart).format("DD-MM-YYYY");
+
+        const postRequest = {
+            customer_id: data.customer.value,
+            package_id: data.package.value,
+            stb_no: data.stb.value,
+            recurring: data.recurring.value,
+            add_on: data.addon,
+            notify: data.notes,
+            category_id: data.category.value,
+            start_date: plane_Date,
+            invoice_date: invoice_Date,
+            items: form,
+        }
+        const addCustomerSubscriptionResponse = await postClientUrlWithToken(authState.apiUrl, authState.userRole === 1 ? addCustomerSubscription : addCustomerSubscriptionRole, postRequest);
+        const id = addCustomerSubscriptionResponse?.data?.data;
+        if (addCustomerSubscriptionResponse.status === 200) {
+            if (addCustomerSubscriptionResponse.data.status === true) {
+                if (id) {
+                    const cust_id = data.customer.value;
+                    navigate(`${process.env.PUBLIC_URL}/customers/customer/userProfile/invoice?invoice_id=${id}&customer_id=${cust_id}`);
+                }
+                toast.success(addCustomerSubscriptionResponse.data.message);
+            } else {
+                toast.error(addCustomerSubscriptionResponse.data.message);
+                setspinnerTrans(false)
+            }
+
+        } else if (addCustomerSubscriptionResponse.status >= 400 && addCustomerSubscriptionResponse.status <= 405) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page1`);
+        } else if (addCustomerSubscriptionResponse.status >= 500 && addCustomerSubscriptionResponse.status <= 505) {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page4`);
+        } else {
+            navigate(`${process.env.PUBLIC_URL}/pages/error/error-page3`);
+        }
+        setspinnerTrans(false)
+    };
+    return (
+        <Fragment>
+            {spinnerTrans && <Transparentspinner />}
+
+
+            <Breadcrumbs mainTitle={Subscription} parent="Billing" title={Subscription} />
+            <Card>
+
+                <Nav className="nav-primary" tabs>
+                    {/* <NavItem >
+                        <NavLink className={IconWithTab === '1' ? 'active' : ''} onClick={() => setIconWithTab('1')}><span className="fs-6 fw-bold cursor ">{AddSub}</span></NavLink>
+                    </NavItem> */}
+                    {/* <NavItem>
+                        <NavLink className={IconWithTab === '2' ? 'active' : ''} onClick={() => setIconWithTab('2')}><span className="fs-6 fw-bold cursor">{RenewSubscription}</span></NavLink>
+                    </NavItem> */}
+
+                </Nav>
+                <TabContent activeTab={IconWithTab}>
+
+                    <TabPane className="fade show" tabId="1">
+
+                        <CardHeader className="pb-0">
+                            <H3>{AddSub}</H3>
+                        </CardHeader>
+                        <CardBody>
+                            <Form className="needs-validation" noValidate onSubmit={handleSubmit(onSubmit)}>
+                                <Row className="g-3 pt-3">
+                                    <Col md="6">
+                                        <Label className="form-label" >{Customer} <span className="requireStar">*</span></Label>
+                                        <Controller
+                                            name="customer"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <Typeahead
+                                                    options={customerOption}
+                                                    onChange={(value) => {
+                                                        field.onChange(value);
+
+                                                        setselectedCust(value);
+                                                        selectCustomerStb(value)
+                                                        resetCustomer()
+                                                        setselectedstbId(null)
+
+                                                    }}
+                                                    value={field.value}
+                                                />
+                                            )}
+                                        />
+                                        <p className="text-danger">{errors.customer?.message}</p>
+                                    </Col>
+                                    <Col md="6">
+                                        <Label className="form-label" >{StbModem} <span className="requireStar">*</span></Label>
+                                        <Controller
+                                            name="stb"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <Typeahead
+                                                    placeholder="Select..."
+                                                    options={stbOption}
+                                                    onChange={(value) => {
+                                                        field.onChange(value);
+                                                        const connection = value.connection;
+                                                        packageData(connection)
+                                                        // setaddoncon(connection);
+                                                        addon(connection)
+                                                        // setselectpackage(null);
+                                                        setselectedstbId(value.id);
+                                                        resetStb()
+
+                                                    }}
+                                                    value={field.value}
+                                                />
+                                            )}
+                                        />
+                                        <p className="text-danger">{errors.stb?.message}</p>
+                                    </Col>
+                                </Row>
+                                {selectedstbId != null && (
+                                    <SubscribedTable
+                                        data={selectedstbId}
+                                        setSpinner={setspinnerTrans}
+                                    />
+                                )}
+                                <Row className="g-3 pt-3">
+                                    <Col md="6">
+                                        <FormGroup className="mb-3">
+                                            <Label className="form-label" for="invoice_date">{InvoiceDate} <span className="requireStar">*</span></Label>
+                                            <Col xl='12' md="12" sm='12'>
+                                                <DatePicker
+                                                    id="invoice_date"
+                                                    style={{ padding: '12px 100px' }}
+                                                    className="form-control "
+                                                    dateFormat="dd/MM/yyyy"
+                                                    placeholderText="dd/mm/yyyy"
+                                                    selected={startDate}
+                                                    onChange={handleChangeInvoicedate}
+                                                    required
+                                                />
+
+                                            </Col>
+
+                                            {/* <p className="text-danger">{errors.invoice_date?.message}</p> */}
+                                        </FormGroup>
+                                    </Col>
+                                    <Col md="6">
+                                        <FormGroup className="mb-3">
+                                            <Label className="form-label" for="plan_date">{PlanDate}  <span className="requireStar">*</span></Label>
+                                            {/* <Col xl='12' md="12" sm='12'> */}
+                                            <DatePicker
+                                                id="plan_date"
+                                                style={{ padding: '12px 100px' }}
+                                                className="form-control "
+                                                dateFormat="dd/MM/yyyy"
+                                                placeholderText="dd/mm/yyyy"
+                                                selected={planStart}
+                                                onChange={handleChangePlanedate}
+
+                                            />
+
+                                            {/* </Col>   */}
+                                        </FormGroup>
+                                    </Col>
+                                </Row>
+                                <Row className="">
+                                    <Col md="6">
+                                        <Label className="form-label" >{Category} <span className="requireStar">*</span></Label>
+                                        <Controller
+                                            name="category"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <Typeahead
+                                                    options={categoryOption}
+                                                    onChange={(value) => {
+                                                        field.onChange(value);
+                                                    }}
+                                                    value={field.value}
+                                                />
+                                            )}
+                                        />
+                                        <p className="text-danger">{errors.category?.message}</p>
+                                    </Col>
+                                    <Col md='6'>
+                                        <Label className="form-label" >{Recurring} <span className="requireStar">*</span></Label>
+                                        <Controller
+                                            name="recurring"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <Typeahead
+                                                    id="recurring"
+                                                    options={disableRecurring == 1 ? recurringOptionssecound : recurringOptions}
+                                                    onChange={(value) => {
+                                                        field.onChange(value);
+                                                    }}
+                                                    value={field.value}
+                                                // disabled = {planStart < new Date()}
+
+                                                />
+                                            )}
+                                        />
+                                        <p className="text-danger">{errors.recurring?.message}</p>
+                                    </Col>
+
+                                </Row>
+
+
+                                <div style={{ paddingTop: '20px' }}>
+                                    <H3>{ChooseSub}</H3>
+                                </div>
+                                <div className="bg-subscription">
+                                    <Row className=" ">
+                                        <Col md="6">
+                                            <Label className="form-label" >{Package}</Label>
+                                            <Controller
+                                                name="package"
+                                                control={control}
+                                                render={({ field }) => (
+                                                    <Typeahead
+                                                        id="package"
+                                                        options={packageOption}
+                                                        onChange={(value) => {
+                                                            field.onChange(value);
+                                                            // setselectpackage(value.value)
+                                                            handleProductSelect(value)
+                                                            resetPackage()
+                                                        }}
+                                                        value={field.value}
+
+                                                    />
+                                                )}
+                                            />
+                                            <p className="text-danger">{errors.package?.message}</p>
+                                        </Col>
+
+                                        <Col md="6">
+                                            <Label className="form-label" >{Addon}</Label>
+                                            <Controller
+                                                name="addon"
+                                                control={control}
+                                                render={({ field }) => (
+                                                    <Typeahead
+                                                        id="addon"
+                                                        options={addonsOptions.filter(option => !disableOptions.includes(option.value))}
+                                                        onChange={(value) => {
+                                                            const Selectedvalue = value.value;
+                                                            field.onChange(value);
+                                                            handleProductSelect(value);
+                                                            handleAddonOption(Selectedvalue);
+
+                                                        }}
+                                                        selected={field.value ? addonsOptions.filter(option => option.value === field.value) : []}
+                                                    />
+                                                )}
+                                            />
+                                        </Col>
+
+                                    </Row>
+                                    <Row>
+                                        {form.length > 0 && (
+                                            <Table className="table border subcription-table mt-4">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Item</th>
+                                                        <th className="text-end">Unit cost</th>
+                                                        <th>Discount </th>
+                                                        <th>Tax</th>
+                                                        <th className="text-end">Total</th>
+                                                        <th>Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {form.map((item, index) => (
+                                                        <tr className="" key={index}>
+                                                            <td className="">
+                                                                <input
+                                                                    name={`items[${index}].name`}
+                                                                    placeholder='Item'
+                                                                    value={item.name}
+                                                                    readOnly
+                                                                    className="form-control"
+                                                                />
+                                                            </td>
+                                                            <td className=" col-2">
+                                                                <input
+                                                                    name={`items[${index}].price`}
+                                                                    placeholder='Unit cost'
+                                                                    value={`${currency} ${item.price}`}
+                                                                    className="form-control text-end"
+                                                                    readOnly
+
+                                                                />
+                                                            </td>
+
+                                                            <td className=" col-2">
+                                                                <input
+                                                                    name={`items[${index}].discount`}
+                                                                    placeholder='Discount'
+                                                                    defaultValue={0}
+                                                                    min={0}
+                                                                    onChange={(e) => handletotalamount(index, e.target.value)}
+                                                                    className="form-control text-center"
+                                                                />
+                                                            </td>
+                                                            <td className=" col-2">
+                                                                <input
+                                                                    name={`items[${index}].tax`}
+                                                                    placeholder='Tax'
+                                                                    value={item.tax}
+                                                                    className="form-control "
+                                                                    readOnly
+
+                                                                />
+                                                            </td>
+                                                            <td className=" col-2">
+                                                                <input
+                                                                    name={`items[${index}].total`}
+                                                                    min={0}
+                                                                    placeholder='Total'
+                                                                    value={`${currency} ${parseFloat(item.total).toFixed(authState.decimal)}`}
+                                                                    className="form-control text-end"
+                                                                    readOnly
+
+
+                                                                />
+                                                            </td>
+                                                            <td className="">
+                                                                <button type="button" onClick={() => handleRemove(index, item)} className="btn btn-danger"><i className="fa fa-trash-o"></i></button>
+                                                            </td>
+                                                        </tr>
+
+                                                    ))}
+                                                </tbody>
+                                                <tfoot>
+                                                    <tr className="table-row-color">
+                                                        <th>Total</th>
+                                                        <th className="text-end"> Unit cost : <span className="">{currency} {totalunitcost}</span></th>
+                                                        <th className="text-end"> Discount : <span>{currency} {totalDiscount}</span></th>
+                                                        <th className="text-end "> Tax : <span>{currency} {totalTaxamount}</span></th>
+                                                        <th className="text-end fs-5">Total :</th>
+                                                        <th className="text-start fs-5 ps-0"><span className="fw-bolder">{currency} {grandTotl}</span></th>
+                                                        {/* <th></th> */}
+                                                    </tr>
+                                                </tfoot>
+                                            </Table>
+                                        )}
+
+                                    </Row>
+
+                                </div>
+
+                                <Row>
+                                    <Col>
+                                        <Label className="form-label pt-3">{Notes}</Label>
+                                        <Controller
+                                            name="notes"
+                                            control={control}
+                                            render={({ field }) => (
+                                                <textarea
+
+                                                    className="form-control"
+                                                    {...field}
+                                                    rows="3"
+                                                    {...register('notes', { required: true })}
+                                                />
+                                            )}
+                                        />
+                                        <p className="text-danger">{errors.notes?.message}</p>
+                                    </Col>
+                                </Row>
+                                <FormGroup>
+                                </FormGroup>
+                                <Btn attrBtn={{ color: "primary" }} type="submit">{Save}</Btn>
+                            </Form>
+
+                        </CardBody>
+                    </TabPane>
+                    {/* <TabPane tabId="2">
+
+                        <RenewSubcription />
+                    </TabPane> */}
+
+                </TabContent>
+            </Card>
+        </Fragment>
+    )
+}
+export default SubscriptionForm;
